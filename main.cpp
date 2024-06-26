@@ -74,27 +74,15 @@ public:
 		m_dummyHead.next = &m_dummyTail;
 		m_dummyTail.prev = &m_dummyHead;
 		m_dummyTail.hash = std::numeric_limits<size_t>::max();
+		for(auto& it: m_budget)
+		{
+			it = &m_dummyTail;
+		}
 	}
 
 	void insert(const K& key, const V& value)
 	{
 		size_t hash = HASHER{}(key) % 521;
-
-		if(m_budget[hash] == nullptr)
-		{
-			Seek* newSeek = new Seek{};
-			newSeek->value = new std::pair<const K, V>{key, value};
-			newSeek->hash = hash;
-			Seek* const old_tail = m_dummyTail.prev;
-			old_tail->next = newSeek;
-			newSeek->prev = old_tail;
-			newSeek->next = &m_dummyTail;
-			m_dummyTail.prev = newSeek;
-			m_budget[hash] = newSeek;
-			m_count += 1;
-			return;
-		}
-
 		Seek* it = m_budget[hash];
 		while(it->hash == hash)
 		{
@@ -129,25 +117,19 @@ public:
 		next->prev = prev;
 		m_count -= 1;
 		size_t hash = it.it->hash;
-		delete it->value;
-		delete it;
-		if(m_budget[hash] == it)
+		delete it.it->value;
+		delete it.it;
+		if(m_budget[hash] == it.it)
 		{
-			m_budget[hash] = nullptr;
+			m_budget[hash] = &m_dummyTail;
 		}
 
 		return Iterator{next};
 	}
 
-	template<typename U, typename U_HASHER = std::hash<U>>
-	Iterator find(const U& key)
+	Iterator find(const K& key)
 	{
-		size_t hash = U_HASHER{}(key) % 521;
-		if(m_budget[hash] == nullptr)
-		{
-			return end();
-		}
-
+		size_t hash = HASHER{}(key) % 521;
 		Seek* it = m_budget[hash];
 		while(it->hash == hash)
 		{
@@ -165,11 +147,6 @@ public:
 	void erase(const K& key)
 	{
 		size_t hash = HASHER{}(key) % 521;
-		if(m_budget[hash] == nullptr)
-		{
-			return;
-		}
-
 		Seek* it = m_budget[hash];
 		while(it->hash == hash)
 		{
@@ -184,7 +161,7 @@ public:
 				delete it;
 				if(m_budget[hash] == it)
 				{
-					m_budget[hash] = nullptr;
+					m_budget[hash] = &m_dummyTail;
 				}
 
 				return;
@@ -197,21 +174,6 @@ public:
 	V& operator[](const K& key)
 	{
 		size_t hash = HASHER{}(key) % 521;
-		if(m_budget[hash] == nullptr)
-		{
-			Seek* newSeek = new Seek{};
-			newSeek->value = new std::pair<const K, V>{key, {}};
-			newSeek->hash = hash;
-			Seek* const old_tail = m_dummyTail.prev;
-			old_tail->next = newSeek;
-			newSeek->prev = old_tail;
-			newSeek->next = &m_dummyTail;
-			m_dummyTail.prev = newSeek;
-			m_budget[hash] = newSeek;
-			m_count += 1;
-			return newSeek->value->second;
-		}
-
 		Seek* it = m_budget[hash];
 		while(it->hash == hash)
 		{
@@ -255,7 +217,8 @@ int main() {
 
 	}
 
-	auto it = table.find(std::string_view{"a"});
-
+	auto it = table.find("a");
+	table.erase(it);
+	table.erase("qaa");
 	return 0;
 }
