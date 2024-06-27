@@ -8,18 +8,28 @@
 #pragma comment(lib, "Rpcrt4.lib")
 
 template<typename K, typename V, typename HASHER = std::hash<K>>
-class HashTable {
-	struct Seek {
+class HashTable
+{
+	using pair = std::pair<const K, V>;
+	struct Seek
+	{
 		Seek* prev;
 		Seek* next;
 		size_t hash;
-		std::pair<const K, V>* value;
+		pair* value;
 	};
+
+	struct Node
+	{
+		Seek seek;
+		pair value;
+	};
+
 public:
 	template<typename PAIR_TYPE>
 	struct Iterator
 	{
-		const Seek* it;
+		Seek* it;
 		PAIR_TYPE& operator*()
 		{
 			return *(it->value);
@@ -71,6 +81,7 @@ public:
 			, m_dummyTail()
 			, m_budget()
 			, m_count()
+			, m_recycleNode()
 	{
 		m_dummyHead.next = &m_dummyTail;
 		m_dummyTail.prev = &m_dummyHead;
@@ -100,6 +111,7 @@ public:
 		m_dummyTail.prev = rhs.m_dummyTail.prev;
 		m_dummyHead.next->prev = &m_dummyHead;
 		m_dummyTail.prev->next = &m_dummyTail;
+		m_recycleNode = rhs.m_recycleNode;
 		for(auto& it: m_budget)
 		{
 			if(it == &rhs.m_dummyTail)
@@ -117,8 +129,16 @@ public:
 		while(it != &m_dummyTail)
 		{
 			Seek* const next = it->next;
-			delete it->value;
-			delete it;
+			it->value->~pair();
+			free(it);
+			it = next;
+		}
+
+		it = m_recycleNode;
+		while(it != nullptr)
+		{
+			Seek* const next = it->next;
+			free(it);
 			it = next;
 		}
 	}
@@ -138,8 +158,20 @@ public:
 			it = it->next;
 		}
 
-		Seek* newSeek = new Seek{};
-		newSeek->value = new std::pair<const K, V>{key, value};
+
+		Seek* newSeek = m_recycleNode;
+		if(newSeek != nullptr)
+		{
+			m_recycleNode = newSeek->next;
+		}
+		else
+		{
+			Node* newNode = (Node*)malloc(sizeof(Node));
+			newSeek = &newNode->seek;
+			newSeek->value = &newNode->value;
+		}
+
+		new(newSeek->value) std::pair<const K, V>{key, value};
 		newSeek->hash = hash;
 		Seek* prev = it->prev;
 		newSeek->prev = prev;
@@ -153,7 +185,7 @@ public:
 		}
 	}
 
-	Iterator<std::pair<const K, V>> erase(const Iterator<std::pair<const K, V>>& it)
+	Iterator<std::pair<const K, V>> erase(Iterator<std::pair<const K, V>> it)
 	{
 		if(it == end())
 			return it;
@@ -164,8 +196,10 @@ public:
 		next->prev = prev;
 		m_count -= 1;
 		size_t hash = it.it->hash;
-		delete it.it->value;
-		delete it.it;
+		Seek* dropped = it.it;
+		dropped->value->~pair();
+		dropped->next = m_recycleNode;
+		m_recycleNode = dropped;
 		if(m_budget[hash] == it.it)
 		{
 			m_budget[hash] = &m_dummyTail;
@@ -199,7 +233,7 @@ public:
 		{
 			if(it->value->first == key)
 			{
-				continue;
+				break;
 			}
 
 			it = it->next;
@@ -212,8 +246,9 @@ public:
 			prev->next = next;
 			next->prev = prev;
 			m_count -= 1;
-			delete it->value;
-			delete it;
+			it->value->~pair();
+			it->next = m_recycleNode;
+			m_recycleNode = it;
 			if(m_budget[hash] == it)
 			{
 				m_budget[hash] = &m_dummyTail;
@@ -270,8 +305,19 @@ public:
 			it = it->next;
 		}
 
-		Seek* newSeek = new Seek{};
-		newSeek->value = new std::pair<const K, V>{key, {}};
+		Seek* newSeek = m_recycleNode;
+		if(newSeek != nullptr)
+		{
+			m_recycleNode = newSeek->next;
+		}
+		else
+		{
+			Node* newNode = (Node*)malloc(sizeof(Node));
+			newSeek = &newNode->seek;
+			newSeek->value = &newNode->value;
+		}
+
+		new(newSeek->value) std::pair<const K, V>{key, {}};
 		newSeek->hash = hash;
 		Seek* prev = it->prev;
 		newSeek->prev = prev;
@@ -291,10 +337,11 @@ public:
 	Iterator<std::pair<const K, V>> end() { return Iterator<std::pair<const K, V>>{&m_dummyTail}; }
 
 	[[nodiscard]] Iterator<const std::pair<const K, V>> begin() const { return Iterator<const std::pair<const K, V>>{m_dummyHead.next}; }
-	[[nodiscard]] Iterator<const std::pair<const K, V>> end() const { return Iterator<const std::pair<const K, V>>{&m_dummyTail}; }
+	[[nodiscard]] Iterator<const std::pair<const K, V>> end() const { return Iterator<const std::pair<const K, V>>{const_cast<Seek*>(&m_dummyTail)}; }
 private:
 	Seek m_dummyHead;
 	Seek m_dummyTail;
+	Seek* m_recycleNode;
 	Seek* m_budget[521];
 	size_t m_count;
 };
@@ -307,13 +354,14 @@ int main() {
 	UuidCreate(&table["a"]);
 	for(auto& it: table)
 	{
-
+		it.second.Data1 = 5;
 	}
 
 	const HashTable<std::string, UUID>& t3 = table;
 	const auto& t4 = table5;
 	for(auto& it: t4)
 	{
+		// it.second.Data1 = 5;
 	}
 
 	auto it = table.find("a");
