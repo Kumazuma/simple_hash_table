@@ -16,15 +16,16 @@ class HashTable {
 		std::pair<const K, V>* value;
 	};
 public:
+	template<typename PAIR_TYPE>
 	struct Iterator
 	{
-		Seek* it;
-		std::pair<const K, V>& operator*()
+		const Seek* it;
+		PAIR_TYPE& operator*()
 		{
 			return *(it->value);
 		}
 
-		std::pair<const K, V>* operator->()
+		PAIR_TYPE* operator->()
 		{
 			return it->value;
 		}
@@ -80,6 +81,48 @@ public:
 		}
 	}
 
+	HashTable(const HashTable& rhs)
+			: HashTable()
+	{
+		for(auto& it: rhs)
+		{
+			insert(it.first, it.second);
+		}
+	}
+
+	HashTable(HashTable&& rhs) noexcept
+			: HashTable()
+	{
+		memcpy(m_budget, rhs.m_budget, sizeof(m_budget));
+		m_count = rhs.m_count;
+		rhs.m_count = 0;
+		m_dummyHead.next = rhs.m_dummyHead.next;
+		m_dummyTail.prev = rhs.m_dummyTail.prev;
+		m_dummyHead.next->prev = &m_dummyHead;
+		m_dummyTail.prev->next = &m_dummyTail;
+		for(auto& it: m_budget)
+		{
+			if(it == &rhs.m_dummyTail)
+			{
+				it = &m_dummyTail;
+			}
+		}
+
+		new(&rhs) HashTable{};
+	}
+
+	~HashTable()
+	{
+		Seek* it = m_dummyHead.next;
+		while(it != &m_dummyTail)
+		{
+			Seek* const next = it->next;
+			delete it->value;
+			delete it;
+			it = next;
+		}
+	}
+
 	void insert(const K& key, const V& value)
 	{
 		size_t hash = HASHER{}(key) % 521;
@@ -104,9 +147,13 @@ public:
 		newSeek->next = it;
 		it->prev = newSeek;
 		m_count += 1;
+		if(m_budget[hash] == &m_dummyTail)
+		{
+			m_budget[hash] = newSeek;
+		}
 	}
 
-	Iterator erase(const Iterator& it)
+	Iterator<std::pair<const K, V>> erase(const Iterator<std::pair<const K, V>>& it)
 	{
 		if(it == end())
 			return it;
@@ -124,10 +171,10 @@ public:
 			m_budget[hash] = &m_dummyTail;
 		}
 
-		return Iterator{next};
+		return Iterator<std::pair<const K, V>>{next};
 	}
 
-	Iterator find(const K& key)
+	Iterator<std::pair<const K, V>> find(const K& key)
 	{
 		size_t hash = HASHER{}(key) % 521;
 		Seek* it = m_budget[hash];
@@ -135,7 +182,7 @@ public:
 		{
 			if(it->value->first == key)
 			{
-				return Iterator{it};
+				return Iterator<std::pair<const K, V>>{it};
 			}
 
 			it = it->next;
@@ -152,26 +199,64 @@ public:
 		{
 			if(it->value->first == key)
 			{
-				Seek* prev = it->prev;
-				Seek* next = it->next;
-				prev->next = next;
-				next->prev = prev;
-				m_count -= 1;
-				delete it->value;
-				delete it;
-				if(m_budget[hash] == it)
-				{
-					m_budget[hash] = &m_dummyTail;
-				}
-
-				return;
+				continue;
 			}
 
 			it = it->next;
 		}
+
+		if(it->value->first == key)
+		{
+			Seek* prev = it->prev;
+			Seek* next = it->next;
+			prev->next = next;
+			next->prev = prev;
+			m_count -= 1;
+			delete it->value;
+			delete it;
+			if(m_budget[hash] == it)
+			{
+				m_budget[hash] = &m_dummyTail;
+			}
+		}
 	}
 
-	V& operator[](const K& key)
+	[[nodiscard]] V& get(const K& key)
+	{
+		size_t hash = HASHER{}(key) % 521;
+		Seek* it = m_budget[hash];
+		while(it->hash == hash)
+		{
+			if(it->value->first == key)
+			{
+				return it->value->second;
+			}
+
+			it = it->next;
+		}
+
+		throw std::out_of_range("can not find item");
+	}
+
+	[[nodiscard]] const V& get(const K& key) const
+	{
+
+		size_t hash = HASHER{}(key) % 521;
+		Seek* it = m_budget[hash];
+		while(it->hash == hash)
+		{
+			if(it->value->first == key)
+			{
+				return it->value->second;
+			}
+
+			it = it->next;
+		}
+
+		throw std::out_of_range("can not find item");
+	}
+
+	[[nodiscard]] V& operator[](const K& key)
 	{
 		size_t hash = HASHER{}(key) % 521;
 		Seek* it = m_budget[hash];
@@ -194,12 +279,19 @@ public:
 		newSeek->next = it;
 		it->prev = newSeek;
 		m_count += 1;
+		if(m_budget[hash] == &m_dummyTail)
+		{
+			m_budget[hash] = newSeek;
+		}
+
 		return newSeek->value->second;
 	}
 
-	Iterator begin() { return Iterator{m_dummyHead.next}; }
-	Iterator end() { return Iterator{&m_dummyTail}; }
+	Iterator<std::pair<const K, V>> begin() { return Iterator<std::pair<const K, V>>{m_dummyHead.next}; }
+	Iterator<std::pair<const K, V>> end() { return Iterator<std::pair<const K, V>>{&m_dummyTail}; }
 
+	[[nodiscard]] Iterator<const std::pair<const K, V>> begin() const { return Iterator<const std::pair<const K, V>>{m_dummyHead.next}; }
+	[[nodiscard]] Iterator<const std::pair<const K, V>> end() const { return Iterator<const std::pair<const K, V>>{&m_dummyTail}; }
 private:
 	Seek m_dummyHead;
 	Seek m_dummyTail;
@@ -209,6 +301,7 @@ private:
 
 int main() {
 
+	std::unordered_map<std::string, UUID> table5;
 	HashTable<std::string, UUID> table;
 	table.insert("qaa", {});
 	UuidCreate(&table["a"]);
@@ -217,8 +310,16 @@ int main() {
 
 	}
 
+	const HashTable<std::string, UUID>& t3 = table;
+	const auto& t4 = table5;
+	for(auto& it: t4)
+	{
+	}
+
 	auto it = table.find("a");
+	auto t2 = table;
 	table.erase(it);
 	table.erase("qaa");
+
 	return 0;
 }
