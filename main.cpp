@@ -5,6 +5,7 @@
 #include <iostream>
 #include <functional>
 #include <windows.h>
+#include <unordered_set>
 #pragma comment(lib, "Rpcrt4.lib")
 
 template<typename K, typename V, typename HASHER = std::hash<K>>
@@ -15,6 +16,7 @@ class HashTable
 	{
 		Seek* prev;
 		Seek* next;
+		size_t budgetIndex;
 		size_t hash;
 		pair* value;
 	};
@@ -85,7 +87,7 @@ public:
 	{
 		m_dummyHead.next = &m_dummyTail;
 		m_dummyTail.prev = &m_dummyHead;
-		m_dummyTail.hash = std::numeric_limits<size_t>::max();
+		m_dummyTail.budgetIndex = std::numeric_limits<size_t>::max();
 		for(auto& it: m_budget)
 		{
 			it = &m_dummyTail;
@@ -145,14 +147,16 @@ public:
 
 	void insert(const K& key, const V& value)
 	{
-		size_t hash = HASHER{}(key) % 521;
-		Seek* it = m_budget[hash];
-		while(it->hash == hash)
+		const size_t hash = HASHER{}(key);
+		const size_t budgetIndex = hash % 521;
+		Seek* it = m_budget[budgetIndex];
+		while(it->budgetIndex == budgetIndex)
 		{
-			if(it->value->first == key)
-			{
-				// 삽입에 실패했다.
-				return;
+			if(it->hash == hash) {
+				if(it->value->first == key) {
+					// 삽입에 실패했다.
+					return;
+				}
 			}
 
 			it = it->next;
@@ -171,7 +175,8 @@ public:
 			newSeek->value = &newNode->value;
 		}
 
-		new(newSeek->value) std::pair<const K, V>{key, value};
+		new(newSeek->value) pair{key, value};
+		newSeek->budgetIndex = budgetIndex;
 		newSeek->hash = hash;
 		Seek* prev = it->prev;
 		newSeek->prev = prev;
@@ -179,13 +184,13 @@ public:
 		newSeek->next = it;
 		it->prev = newSeek;
 		m_count += 1;
-		if(m_budget[hash] == &m_dummyTail)
+		if(m_budget[budgetIndex] == &m_dummyTail)
 		{
-			m_budget[hash] = newSeek;
+			m_budget[budgetIndex] = newSeek;
 		}
 	}
 
-	Iterator<std::pair<const K, V>> erase(Iterator<std::pair<const K, V>> it)
+	Iterator<pair> erase(Iterator<pair> it)
 	{
 		if(it == end())
 			return it;
@@ -195,28 +200,30 @@ public:
 		prev->next = next;
 		next->prev = prev;
 		m_count -= 1;
-		size_t hash = it.it->hash;
+		const size_t budgetIndex = it.it->budgetIndex;
 		Seek* dropped = it.it;
 		dropped->value->~pair();
 		dropped->next = m_recycleNode;
 		m_recycleNode = dropped;
-		if(m_budget[hash] == it.it)
+		if(m_budget[budgetIndex] == it.it)
 		{
-			m_budget[hash] = &m_dummyTail;
+			m_budget[budgetIndex] = &m_dummyTail;
 		}
 
-		return Iterator<std::pair<const K, V>>{next};
+		return Iterator<pair>{next};
 	}
 
-	Iterator<std::pair<const K, V>> find(const K& key)
+	Iterator<pair> find(const K& key)
 	{
-		size_t hash = HASHER{}(key) % 521;
-		Seek* it = m_budget[hash];
-		while(it->hash == hash)
+		const size_t hash = HASHER{}(key) % 521;
+		const size_t budgetIndex = hash % 521;
+		Seek* it = m_budget[budgetIndex];
+		while(it->budgetIndex == budgetIndex)
 		{
-			if(it->value->first == key)
-			{
-				return Iterator<std::pair<const K, V>>{it};
+			if(hash == it->hash) {
+				if(it->value->first == key) {
+					return Iterator<pair>{it};
+				}
 			}
 
 			it = it->next;
@@ -227,44 +234,50 @@ public:
 
 	void erase(const K& key)
 	{
-		size_t hash = HASHER{}(key) % 521;
-		Seek* it = m_budget[hash];
-		while(it->hash == hash)
+		const size_t hash = HASHER{}(key);
+		const size_t budgetIndex = hash % 521;
+		Seek* it = m_budget[budgetIndex];
+		Seek* item = nullptr;
+		while(it->budgetIndex == budgetIndex)
 		{
-			if(it->value->first == key)
-			{
-				break;
+			if(hash == it->hash) {
+				if(it->value->first == key) {
+					item = it;
+					break;
+				}
 			}
 
 			it = it->next;
 		}
 
-		if(it->value->first == key)
+		if(item != nullptr)
 		{
-			Seek* prev = it->prev;
-			Seek* next = it->next;
+			Seek* prev = item->prev;
+			Seek* next = item->next;
 			prev->next = next;
 			next->prev = prev;
 			m_count -= 1;
-			it->value->~pair();
-			it->next = m_recycleNode;
-			m_recycleNode = it;
-			if(m_budget[hash] == it)
+			item->value->~pair();
+			item->next = m_recycleNode;
+			m_recycleNode = item;
+			if(m_budget[budgetIndex] == item)
 			{
-				m_budget[hash] = &m_dummyTail;
+				m_budget[budgetIndex] = &m_dummyTail;
 			}
 		}
 	}
 
 	[[nodiscard]] V& get(const K& key)
 	{
-		size_t hash = HASHER{}(key) % 521;
-		Seek* it = m_budget[hash];
-		while(it->hash == hash)
+		const size_t hash = HASHER{}(key);
+		const size_t budgetIndex = hash % 521;
+		Seek* it = m_budget[budgetIndex];
+		while(it->budgetIndex == budgetIndex)
 		{
-			if(it->value->first == key)
-			{
-				return it->value->second;
+			if(hash == it->hash) {
+				if(it->value->first == key) {
+					return it->value->second;
+				}
 			}
 
 			it = it->next;
@@ -276,13 +289,15 @@ public:
 	[[nodiscard]] const V& get(const K& key) const
 	{
 
-		size_t hash = HASHER{}(key) % 521;
-		Seek* it = m_budget[hash];
-		while(it->hash == hash)
+		const size_t hash = HASHER{}(key);
+		const size_t budgetIndex = hash % 521;
+		Seek* it = m_budget[budgetIndex];
+		while(it->budgetIndex == budgetIndex)
 		{
-			if(it->value->first == key)
-			{
-				return it->value->second;
+			if(it->hash == hash) {
+				if(it->value->first == key) {
+					return it->value->second;
+				}
 			}
 
 			it = it->next;
@@ -293,13 +308,15 @@ public:
 
 	[[nodiscard]] V& operator[](const K& key)
 	{
-		size_t hash = HASHER{}(key) % 521;
-		Seek* it = m_budget[hash];
-		while(it->hash == hash)
+		const size_t hash = HASHER{}(key);
+		const size_t budgetIndex = hash % 521;
+		Seek* it = m_budget[budgetIndex];
+		while(it->budgetIndex == budgetIndex)
 		{
-			if(it->value->first == key)
-			{
-				return it->value->second;
+			if(it->hash == hash) {
+				if(it->value->first == key) {
+					return it->value->second;
+				}
 			}
 
 			it = it->next;
@@ -318,6 +335,7 @@ public:
 		}
 
 		new(newSeek->value) std::pair<const K, V>{key, {}};
+		newSeek->budgetIndex = budgetIndex;
 		newSeek->hash = hash;
 		Seek* prev = it->prev;
 		newSeek->prev = prev;
@@ -325,19 +343,32 @@ public:
 		newSeek->next = it;
 		it->prev = newSeek;
 		m_count += 1;
-		if(m_budget[hash] == &m_dummyTail)
+		if(m_budget[budgetIndex] == &m_dummyTail)
 		{
-			m_budget[hash] = newSeek;
+			m_budget[budgetIndex] = newSeek;
 		}
 
 		return newSeek->value->second;
 	}
 
-	Iterator<std::pair<const K, V>> begin() { return Iterator<std::pair<const K, V>>{m_dummyHead.next}; }
-	Iterator<std::pair<const K, V>> end() { return Iterator<std::pair<const K, V>>{&m_dummyTail}; }
+	Iterator<pair> begin() { return Iterator<pair>{m_dummyHead.next}; }
+	Iterator<pair> end() { return Iterator<pair>{&m_dummyTail}; }
 
-	[[nodiscard]] Iterator<const std::pair<const K, V>> begin() const { return Iterator<const std::pair<const K, V>>{m_dummyHead.next}; }
-	[[nodiscard]] Iterator<const std::pair<const K, V>> end() const { return Iterator<const std::pair<const K, V>>{const_cast<Seek*>(&m_dummyTail)}; }
+	[[nodiscard]] Iterator<const pair> begin() const { return Iterator<const pair>{m_dummyHead.next}; }
+	[[nodiscard]] Iterator<const pair> end() const { return Iterator<const pair>{const_cast<Seek*>(&m_dummyTail)}; }\
+
+	[[nodiscard]] int get_budget_count(int budgetIndex) const {
+		int ret = 0;
+		Seek* it = m_budget[budgetIndex];
+		while(it->budgetIndex == budgetIndex)
+		{
+			ret += 1;
+			it = it->next;
+		}
+
+		return ret;
+	}
+
 private:
 	Seek m_dummyHead;
 	Seek m_dummyTail;
@@ -346,7 +377,46 @@ private:
 	size_t m_count;
 };
 
+namespace std {
+	template<>
+	struct hash<UUID> {
+		size_t operator()(const UUID& obj) const {
+			RPC_STATUS ret;
+			return UuidHash(&const_cast<UUID&>(obj), &ret);
+		}
+	};
+}
+
 int main() {
+
+	HashTable<UUID, std::string> t;
+	std::unordered_set<UUID> t2;
+	for(int i = 0; i < 100; ++i)
+	{
+		UUID uuid{};
+		UuidCreateSequential(&uuid);
+		RPC_CSTR uuidStr;
+		UuidToStringA(&uuid, &uuidStr);
+		t.insert(uuid, reinterpret_cast<const char*>(uuidStr));
+		t2.insert(uuid);
+		RpcStringFreeA(&uuidStr);
+
+	}
+
+	for(int i = 0; i < 521; ++i)
+	{
+		std::cout << "[" << i << "] " << t.get_budget_count(i) << std::endl;
+	}
+
+	std::cout << '\n';
+
+	for(auto& it: t2)
+	{
+		auto& s = t.get(it);
+		std::cout << s << std::endl;
+	}
+
+
 
 	std::unordered_map<std::string, UUID> table5;
 	HashTable<std::string, UUID> table;
@@ -365,9 +435,6 @@ int main() {
 	}
 
 	auto it = table.find("a");
-	auto t2 = table;
-	table.erase(it);
-	table.erase("qaa");
 
 	return 0;
 }
