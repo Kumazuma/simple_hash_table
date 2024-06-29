@@ -8,7 +8,7 @@
 #include <unordered_set>
 #pragma comment(lib, "Rpcrt4.lib")
 
-template<typename K, typename V, typename HASHER = std::hash<K>>
+template<typename K, typename V, typename HASHER = std::hash<K>, int BUDGET_SIZE = 521>
 class HashTable
 {
 	using pair = std::pair<const K, V>;
@@ -28,6 +28,7 @@ class HashTable
 	};
 
 public:
+	static constexpr int budget_size = BUDGET_SIZE;
 	template<typename PAIR_TYPE>
 	struct Iterator
 	{
@@ -148,7 +149,7 @@ public:
 	void insert(const K& key, const V& value)
 	{
 		const size_t hash = HASHER{}(key);
-		const size_t budgetIndex = hash % 521;
+		const size_t budgetIndex = hash % BUDGET_SIZE;
 		Seek* it = m_budget[budgetIndex];
 		while(it->budgetIndex == budgetIndex)
 		{
@@ -171,6 +172,9 @@ public:
 		else
 		{
 			Node* newNode = (Node*)malloc(sizeof(Node));
+			if (newNode == nullptr)
+				throw std::bad_alloc{};
+
 			newSeek = &newNode->seek;
 			newSeek->value = &newNode->value;
 		}
@@ -215,8 +219,8 @@ public:
 
 	Iterator<pair> find(const K& key)
 	{
-		const size_t hash = HASHER{}(key) % 521;
-		const size_t budgetIndex = hash % 521;
+		const size_t hash = HASHER{}(key) % BUDGET_SIZE;
+		const size_t budgetIndex = hash % BUDGET_SIZE;
 		Seek* it = m_budget[budgetIndex];
 		while(it->budgetIndex == budgetIndex)
 		{
@@ -235,7 +239,7 @@ public:
 	void erase(const K& key)
 	{
 		const size_t hash = HASHER{}(key);
-		const size_t budgetIndex = hash % 521;
+		const size_t budgetIndex = hash % BUDGET_SIZE;
 		Seek* it = m_budget[budgetIndex];
 		Seek* item = nullptr;
 		while(it->budgetIndex == budgetIndex)
@@ -270,7 +274,7 @@ public:
 	[[nodiscard]] V& get(const K& key)
 	{
 		const size_t hash = HASHER{}(key);
-		const size_t budgetIndex = hash % 521;
+		const size_t budgetIndex = hash % BUDGET_SIZE;
 		Seek* it = m_budget[budgetIndex];
 		while(it->budgetIndex == budgetIndex)
 		{
@@ -290,7 +294,7 @@ public:
 	{
 
 		const size_t hash = HASHER{}(key);
-		const size_t budgetIndex = hash % 521;
+		const size_t budgetIndex = hash % BUDGET_SIZE;
 		Seek* it = m_budget[budgetIndex];
 		while(it->budgetIndex == budgetIndex)
 		{
@@ -309,7 +313,7 @@ public:
 	[[nodiscard]] V& operator[](const K& key)
 	{
 		const size_t hash = HASHER{}(key);
-		const size_t budgetIndex = hash % 521;
+		const size_t budgetIndex = hash % BUDGET_SIZE;
 		Seek* it = m_budget[budgetIndex];
 		while(it->budgetIndex == budgetIndex)
 		{
@@ -330,6 +334,9 @@ public:
 		else
 		{
 			Node* newNode = (Node*)malloc(sizeof(Node));
+			if (newNode == nullptr)
+				throw std::bad_alloc{};
+
 			newSeek = &newNode->seek;
 			newSeek->value = &newNode->value;
 		}
@@ -369,11 +376,16 @@ public:
 		return ret;
 	}
 
+	constexpr int get_budget_size() const
+	{
+		return BUDGET_SIZE;
+	}
+
 private:
 	Seek m_dummyHead;
 	Seek m_dummyTail;
 	Seek* m_recycleNode;
-	Seek* m_budget[521];
+	Seek* m_budget[BUDGET_SIZE];
 	size_t m_count;
 };
 
@@ -399,21 +411,21 @@ namespace std {
 
 int main() {
 
-	HashTable<UUID, std::string> t;
+	HashTable<UUID, std::string, std::hash<UUID>, 32> t;
 	std::unordered_set<UUID> t2;
 	for(int i = 0; i < 100; ++i)
 	{
 		UUID uuid{};
-		UuidCreateSequential(&uuid);
+		(void)UuidCreate(&uuid);
 		RPC_CSTR uuidStr;
-		UuidToStringA(&uuid, &uuidStr);
+		(void)UuidToStringA(&uuid, &uuidStr);
 		t.insert(uuid, reinterpret_cast<const char*>(uuidStr));
 		t2.insert(uuid);
 		RpcStringFreeA(&uuidStr);
 
 	}
 
-	for(int i = 0; i < 521; ++i)
+	for(int i = 0; i < t.get_budget_size(); ++i)
 	{
 		std::cout << "[" << i << "] " << t.get_budget_count(i) << std::endl;
 	}
@@ -426,18 +438,16 @@ int main() {
 		std::cout << s << std::endl;
 	}
 
-
-
 	std::unordered_map<std::string, UUID> table5;
-	HashTable<std::string, UUID> table;
+	HashTable<std::string, UUID, std::hash<std::string>, 31> table;
 	table.insert("qaa", {});
-	UuidCreate(&table["a"]);
+	(void)UuidCreate(&table["a"]);
 	for(auto& it: table)
 	{
 		it.second.Data1 = 5;
 	}
 
-	const HashTable<std::string, UUID>& t3 = table;
+	const auto& t3 = table;
 	const auto& t4 = table5;
 	for(auto& it: t4)
 	{
