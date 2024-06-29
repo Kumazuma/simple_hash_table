@@ -380,9 +380,19 @@ private:
 namespace std {
 	template<>
 	struct hash<UUID> {
-		size_t operator()(const UUID& obj) const {
-			RPC_STATUS ret;
-			return UuidHash(&const_cast<UUID&>(obj), &ret);
+		size_t operator()(const UUID& obj) const noexcept {
+			// FNV1V
+			static constexpr uint32_t prime = 16777619;
+			static constexpr uint32_t offsetBasis = 2166136261;
+			size_t ret = offsetBasis;
+			const uint8_t(&octets)[16] = *reinterpret_cast<const uint8_t(*)[16]>(&obj);
+			for(auto octet: octets)
+			{
+				ret = ret ^ octet;
+				ret = ret * prime;
+			}
+
+			return ret;
 		}
 	};
 }
