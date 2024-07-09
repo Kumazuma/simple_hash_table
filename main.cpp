@@ -188,7 +188,7 @@ public:
 		newSeek->next = it;
 		it->prev = newSeek;
 		m_count += 1;
-		if(m_budget[budgetIndex] == &m_dummyTail)
+		if(m_budget[budgetIndex]->budgetIndex != budgetIndex)
 		{
 			m_budget[budgetIndex] = newSeek;
 		}
@@ -211,7 +211,7 @@ public:
 		m_recycleNode = dropped;
 		if(m_budget[budgetIndex] == it.it)
 		{
-			m_budget[budgetIndex] = &m_dummyTail;
+			m_budget[budgetIndex] = it.it->next;
 		}
 
 		return Iterator<pair>{next};
@@ -266,7 +266,7 @@ public:
 			m_recycleNode = item;
 			if(m_budget[budgetIndex] == item)
 			{
-				m_budget[budgetIndex] = &m_dummyTail;
+				m_budget[budgetIndex] = item->next;
 			}
 		}
 	}
@@ -350,7 +350,7 @@ public:
 		newSeek->next = it;
 		it->prev = newSeek;
 		m_count += 1;
-		if(m_budget[budgetIndex] == &m_dummyTail)
+		if(m_budget[budgetIndex] != budgetIndex)
 		{
 			m_budget[budgetIndex] = newSeek;
 		}
